@@ -1,0 +1,37 @@
+name: Deployment
+on:
+  pull_request:
+    types:
+    - closed
+    branches:
+    - master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-18.04
+    steps:
+    - name: Git pull existing repo
+      uses: actions/checkout@v1
+    - name: AWS CLI
+      uses: chrislennon/action-aws-cli@v1.1
+    - name: AWS Deploy
+      run: |
+        PR_NUMBER=$(jq ".number" $GITHUB_EVENT_PATH)
+        PR_OWNER=$(awk -F'/' '{print $1}' <<<$GITHUB_REPOSITORY)
+        PR_REPO=$(awk -F'/' '{print $2}' <<<$GITHUB_REPOSITORY)
+        RESPONSE=$(curl -s --request POST \
+          --url https://api.github.com/graphql \
+          --header "authorization: bearer ${{ secrets.GITHUB_TOKEN }}" \
+          --header 'content-type: application/json' \
+          --data "{\"query\":\"{repository(owner:\\\"$PR_OWNER\\\",name:\\\"$PR_REPO\\\"){pullRequest(number:$PR_NUMBER){reviews(last:1){edges{node{state}}}merged}}}\"}")
+        VALUE=$(jq -r ".data.repository.pullRequest.reviews.edges[0].node.state" <<<$RESPONSE)
+        STATUS=$(jq ".data.repository.pullRequest.merged" <<<$RESPONSE)
+        if [[ "$VALUE" == "APPROVED" && "$STATUS" == "true" ]]; then
+          echo "approved and merged"
+        else
+          exit 2
+        fi
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_DEFAULT_REGION: "us-east-1"
